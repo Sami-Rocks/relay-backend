@@ -1,17 +1,20 @@
-const jwt = require('jsonwebtoken');
+// Modules
+const { verifyToken } = require("../utils/jwt")
 
+// Middleware: Auth
 module.exports = (req, res, next) => {
-  try {
-    const token = req.headers.authorization?.split(' ')[1];
+	try {
+		const authHeader = req.headers.authorization
+		const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null
 
-    if (!token) {
-      return res.status(401).json({ message: 'Authentication required' });
-    }
+		if (!token) {
+			return res.status(401).json({ message: "Authentication required" })
+		}
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
-    next();
-  } catch (error) {
-    res.status(401).json({ message: 'Invalid or expired token' });
-  }
-}; 
+		const decoded = verifyToken(token)
+		req.user = decoded
+		next()
+	} catch (error) {
+		res.status(401).json({ message: "Invalid or expired token" })
+	}
+}

@@ -1,255 +1,304 @@
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+// Modules
+const prisma = require("../lib/prisma")
+const {
+	hasDuplicates,
+	hasOwn,
+	parseAmount,
+	parseId,
+	parseIdArray
+} = require("../utils/request")
 
-// Create a new order
+// Controller: Create Order
 exports.createOrder = async (req, res) => {
-  try {
-    const { shopId, total, productIds } = req.body;
-    const userId = req.user.userId;
+	try {
+		const { shopId, total, productIds } = req.body
+		const userId = req.user.userId
+		const parsedShopId = parseId(shopId)
+		const parsedTotal = parseAmount(total)
+		const parsedProductIds = parseIdArray(productIds)
 
-    // Verify shop exists
-    const shop = await prisma.shop.findUnique({
-      where: { id: parseInt(shopId) }
-    });
-    if (!shop) {
-      return res.status(404).json({ message: "Shop not found" });
-    }
+		if (!parsedShopId || parsedTotal === null || !parsedProductIds || hasDuplicates(parsedProductIds)) {
+			return res.status(400).json({ message: "Valid shopId, total, and unique productIds are required" })
+		}
 
-    // Verify products belong to shop
-    const products = await prisma.product.findMany({
-      where: {
-        id: { in: productIds.map(id => parseInt(id)) },
-        shopId: parseInt(shopId)
-      }
-    });
-    if (products.length !== productIds.length) {
-      return res.status(400).json({ message: "Invalid products for this shop" });
-    }
+		// Verify shop exists
+		const shop = await prisma.shop.findUnique({
+			where: { id: parsedShopId },
+			select: {
+				id: true
+			}
+		})
+		if (!shop) {
+			return res.status(404).json({ message: "Shop not found" })
+		}
 
-    const order = await prisma.order.create({
-      data: {
-        total,
-        userId,
-        shopId: parseInt(shopId),
-        products: {
-          connect: productIds.map(id => ({ id: parseInt(id) }))
-        }
-      },
-      include: {
-        user: {
-          select: {
-            email: true
-          }
-        },
-        shop: {
-          select: {
-            name: true
-          }
-        },
-        products: true
-      }
-    });
+		// Verify products belong to shop
+		const productCount = await prisma.product.count({
+			where: {
+				id: { in: parsedProductIds },
+				shopId: parsedShopId
+			}
+		})
+		if (productCount !== parsedProductIds.length) {
+			return res.status(400).json({ message: "Invalid products for this shop" })
+		}
 
-    res.status(201).json(order);
-  } catch (error) {
-    res.status(500).json({ message: "Error creating order", error: error.message });
-  }
-};
+		const order = await prisma.order.create({
+			data: {
+				total: parsedTotal,
+				userId,
+				shopId: parsedShopId,
+				products: {
+					connect: parsedProductIds.map((id) => ({ id }))
+				}
+			},
+			include: {
+				user: {
+					select: {
+						email: true
+					}
+				},
+				shop: {
+					select: {
+						name: true
+					}
+				},
+				products: true
+			}
+		})
+		res.status(201).json(order)
+	} catch (error) {
+		res.status(500).json({ message: "Error creating order", error: error.message })
+	}
+}
 
-// Get all orders for a user
+// Controller: Get User Orders
 exports.getUserOrders = async (req, res) => {
-  try {
-    const userId = req.user.userId;
-    const orders = await prisma.order.findMany({
-      where: {
-        userId
-      },
-      include: {
-        shop: {
-          select: {
-            name: true
-          }
-        },
-        products: true
-      },
-      orderBy: {
-        createdAt: "desc"
-      }
-    });
-    res.json(orders);
-  } catch (error) {
-    res.status(500).json({ message: "Error fetching orders", error: error.message });
-  }
-};
+	try {
+		const userId = req.user.userId
+		const orders = await prisma.order.findMany({
+			where: {
+				userId
+			},
+			include: {
+				shop: {
+					select: {
+						name: true
+					}
+				},
+				products: true
+			},
+			orderBy: {
+				createdAt: "desc"
+			}
+		})
+		res.json(orders)
+	} catch (error) {
+		res.status(500).json({ message: "Error fetching orders", error: error.message })
+	}
+}
 
-// Get shop orders
+// Controller: Get Shop Orders
 exports.getShopOrders = async (req, res) => {
-  try {
-    const userId = req.user.userId;
-    const { shopId } = req.params;
+	try {
+		const userId = req.user.userId
+		const { shopId } = req.params
+		const parsedShopId = parseId(shopId)
 
-    // Verify shop ownership
-    const shop = await prisma.shop.findFirst({
-      where: {
-        id: parseInt(shopId),
-        userId
-      }
-    });
-    if (!shop) {
-      return res.status(404).json({ message: "Shop not found or unauthorized" });
-    }
+		if (!parsedShopId) {
+			return res.status(400).json({ message: "Invalid shop id" })
+		}
 
-    const orders = await prisma.order.findMany({
-      where: {
-        shopId: parseInt(shopId)
-      },
-      include: {
-        user: {
-          select: {
-            email: true
-          }
-        },
-        products: true
-      },
-      orderBy: {
-        createdAt: "desc"
-      }
-    });
-    res.json(orders);
-  } catch (error) {
-    res.status(500).json({ message: "Error fetching shop orders", error: error.message });
-  }
-};
+		// Verify shop ownership
+		const shop = await prisma.shop.findFirst({
+			where: {
+				id: parsedShopId,
+				userId
+			},
+			select: {
+				id: true
+			}
+		})
+		if (!shop) {
+			return res.status(404).json({ message: "Shop not found or unauthorized" })
+		}
 
-// Get a specific order
+		const orders = await prisma.order.findMany({
+			where: {
+				shopId: parsedShopId
+			},
+			include: {
+				user: {
+					select: {
+						email: true
+					}
+				},
+				products: true
+			},
+			orderBy: {
+				createdAt: "desc"
+			}
+		})
+		res.json(orders)
+	} catch (error) {
+		res.status(500).json({ message: "Error fetching shop orders", error: error.message })
+	}
+}
+
+// Controller: Get Order
 exports.getOrder = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const userId = req.user.userId;
-    const order = await prisma.order.findFirst({
-      where: {
-        id: parseInt(id),
-        OR: [
-          { userId },
-          {
-            shop: {
-              userId
-            }
-          }
-        ]
-      },
-      include: {
-        user: {
-          select: {
-            email: true
-          }
-        },
-        shop: {
-          select: {
-            name: true
-          }
-        },
-        products: true
-      }
-    });
-    if (!order) {
-      return res.status(404).json({ message: "Order not found or unauthorized" });
-    }
-    res.json(order);
-  } catch (error) {
-    res.status(500).json({ message: "Error fetching order", error: error.message });
-  }
-};
+	try {
+		const { id } = req.params
+		const userId = req.user.userId
+		const orderId = parseId(id)
 
-// Update an order
+		if (!orderId) {
+			return res.status(400).json({ message: "Invalid order id" })
+		}
+
+		const order = await prisma.order.findFirst({
+			where: {
+				id: orderId,
+				OR: [
+					{ userId },
+					{
+						shop: {
+							userId
+						}
+					}
+				]
+			},
+			include: {
+				user: {
+					select: {
+						email: true
+					}
+				},
+				shop: {
+					select: {
+						name: true
+					}
+				},
+				products: true
+			}
+		})
+		if (!order) {
+			return res.status(404).json({ message: "Order not found or unauthorized" })
+		}
+		res.json(order)
+	} catch (error) {
+		res.status(500).json({ message: "Error fetching order", error: error.message })
+	}
+}
+
+// Controller: Update Order
 exports.updateOrder = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { total, productIds } = req.body;
-    const userId = req.user.userId;
+	try {
+		const { id } = req.params
+		const { total, productIds } = req.body
+		const userId = req.user.userId
+		const orderId = parseId(id)
+		const parsedTotal = hasOwn(req.body, "total") ? parseAmount(total) : undefined
+		const parsedProductIds = hasOwn(req.body, "productIds") ? parseIdArray(productIds) : undefined
 
-    // Verify order ownership through shop
-    const order = await prisma.order.findFirst({
-      where: {
-        id: parseInt(id),
-        shop: {
-          userId
-        }
-      },
-      include: {
-        products: true
-      }
-    });
-    if (!order) {
-      return res.status(404).json({ message: "Order not found or unauthorized" });
-    }
+		if (!orderId || parsedTotal === null || parsedProductIds === null || (parsedProductIds && hasDuplicates(parsedProductIds))) {
+			return res.status(400).json({ message: "Invalid order id, total, or productIds" })
+		}
 
-    // Verify products belong to shop
-    if (productIds) {
-      const products = await prisma.product.findMany({
-        where: {
-          id: { in: productIds.map(id => parseInt(id)) },
-          shopId: order.shopId
-        }
-      });
-      if (products.length !== productIds.length) {
-        return res.status(400).json({ message: "Invalid products for this shop" });
-      }
-    }
+		if (!hasOwn(req.body, "total") && !hasOwn(req.body, "productIds")) {
+			return res.status(400).json({ message: "No order changes provided" })
+		}
 
-    const updatedOrder = await prisma.order.update({
-      where: { id: parseInt(id) },
-      data: {
-        total: total || order.total,
-        products: productIds ? {
-          set: productIds.map(id => ({ id: parseInt(id) }))
-        } : undefined
-      },
-      include: {
-        user: {
-          select: {
-            email: true
-          }
-        },
-        shop: {
-          select: {
-            name: true
-          }
-        },
-        products: true
-      }
-    });
-    res.json(updatedOrder);
-  } catch (error) {
-    res.status(500).json({ message: "Error updating order", error: error.message });
-  }
-};
+		// Verify order ownership through shop
+		const order = await prisma.order.findFirst({
+			where: {
+				id: orderId,
+				shop: {
+					userId
+				}
+			},
+			select: {
+				id: true,
+				shopId: true
+			}
+		})
+		if (!order) {
+			return res.status(404).json({ message: "Order not found or unauthorized" })
+		}
 
-// Delete an order
+		// Verify products belong to shop
+		if (parsedProductIds) {
+			const productCount = await prisma.product.count({
+				where: {
+					id: { in: parsedProductIds },
+					shopId: order.shopId
+				}
+			})
+			if (productCount !== parsedProductIds.length) {
+				return res.status(400).json({ message: "Invalid products for this shop" })
+			}
+		}
+
+		const updatedOrder = await prisma.order.update({
+			where: { id: orderId },
+			data: {
+				total: parsedTotal,
+				products: parsedProductIds ? {
+					set: parsedProductIds.map((id) => ({ id }))
+				} : undefined
+			},
+			include: {
+				user: {
+					select: {
+						email: true
+					}
+				},
+				shop: {
+					select: {
+						name: true
+					}
+				},
+				products: true
+			}
+		})
+		res.json(updatedOrder)
+	} catch (error) {
+		res.status(500).json({ message: "Error updating order", error: error.message })
+	}
+}
+
+// Controller: Delete Order
 exports.deleteOrder = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const userId = req.user.userId;
+	try {
+		const { id } = req.params
+		const userId = req.user.userId
+		const orderId = parseId(id)
 
-    // Verify order ownership through shop
-    const order = await prisma.order.findFirst({
-      where: {
-        id: parseInt(id),
-        shop: {
-          userId
-        }
-      }
-    });
-    if (!order) {
-      return res.status(404).json({ message: "Order not found or unauthorized" });
-    }
+		if (!orderId) {
+			return res.status(400).json({ message: "Invalid order id" })
+		}
 
-    await prisma.order.delete({
-      where: { id: parseInt(id) }
-    });
+		// Verify order ownership through shop
+		const order = await prisma.order.findFirst({
+			where: {
+				id: orderId,
+				shop: {
+					userId
+				}
+			},
+			select: {
+				id: true
+			}
+		})
+		if (!order) {
+			return res.status(404).json({ message: "Order not found or unauthorized" })
+		}
 
-    res.json({ message: "Order deleted successfully" });
-  } catch (error) {
-    res.status(500).json({ message: "Error deleting order", error: error.message });
-  }
-};
+		await prisma.order.delete({
+			where: { id: orderId }
+		})
+		res.json({ message: "Order deleted successfully" })
+	} catch (error) {
+		res.status(500).json({ message: "Error deleting order", error: error.message })
+	}
+}

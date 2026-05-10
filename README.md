@@ -44,6 +44,9 @@ npm install
 # Create a .env file and add:
 DATABASE_URL="postgresql://username:password@localhost:5432/style_mart"
 JWT_SECRET="your-secure-jwt-secret"
+CLOUDINARY_CLOUD_NAME="your-cloud-name"
+CLOUDINARY_API_KEY="your-api-key"
+CLOUDINARY_API_SECRET="your-api-secret"
 ```
 
 4. Initialize the database:
@@ -117,6 +120,18 @@ npm run dev
 - **Body**: `{ "name": "Updated Name", "description": "Updated description" }`
 - **Response**: Updated shop data
 
+#### Upload Shop Image
+- **POST** `/api/shops/:id/image`
+- **Auth**: Required
+- **Body**: `multipart/form-data` with image field named `image`
+- **Allowed**: JPEG, PNG, WEBP up to 5MB
+- **Response**: Updated shop data
+
+#### Delete Shop Image
+- **DELETE** `/api/shops/:id/image`
+- **Auth**: Required
+- **Response**: Updated shop data
+
 #### Delete Shop
 - **DELETE** `/api/shops/:id`
 - **Auth**: Required
@@ -144,6 +159,18 @@ npm run dev
 - **PUT** `/api/products/:id`
 - **Auth**: Required
 - **Body**: `{ "name": "Updated Name", "description": "Updated description", "price": 39.99 }`
+- **Response**: Updated product data
+
+#### Upload Product Image
+- **POST** `/api/products/:id/image`
+- **Auth**: Required
+- **Body**: `multipart/form-data` with image field named `image`
+- **Allowed**: JPEG, PNG, WEBP up to 5MB
+- **Response**: Updated product data
+
+#### Delete Product Image
+- **DELETE** `/api/products/:id/image`
+- **Auth**: Required
 - **Response**: Updated product data
 
 #### Delete Product
@@ -244,4 +271,4 @@ The API returns appropriate HTTP status codes and error messages:
 
 ## License
 
-This project is licensed under the MIT License. 
+This project is licensed under the MIT License.
