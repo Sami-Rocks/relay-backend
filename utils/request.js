@@ -20,6 +20,17 @@ function parseIdArray (values) {
 	return ids
 }
 
+// Function: Parse List
+function parseList (value) {
+	if (!value) return []
+	if (Array.isArray(value)) return value.filter(Boolean)
+
+	return String(value)
+		.split(",")
+		.map((item) => item.trim())
+		.filter(Boolean)
+}
+
 // Function: Check Duplicates
 function hasDuplicates (values) {
 	return new Set(values).size !== values.length
@@ -47,5 +58,6 @@ module.exports = {
 	hasOwn,
 	parseAmount,
 	parseId,
-	parseIdArray
+	parseIdArray,
+	parseList
 }

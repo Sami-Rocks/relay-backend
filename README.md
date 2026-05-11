@@ -142,7 +142,13 @@ npm run dev
 #### Get All Products
 - **GET** `/api/products`
 - **Auth**: Not required
+- **Query**: `search`, `category`, `gender`, `audience`, `size`, `minPrice`, `maxPrice`, `minRating`, `shopId`, `sort`, `page`, `limit`, `withMeta`
 - **Response**: List of all products with shop info
+
+Example:
+```txt
+/api/products?search=hoodie&category=Hoodies&gender=Unisex&audience=Adults&size=M&minPrice=20&maxPrice=150&minRating=4&sort=price_asc
+```
 
 #### Get Single Product
 - **GET** `/api/products/:id`
@@ -152,13 +158,13 @@ npm run dev
 #### Create Product
 - **POST** `/api/products`
 - **Auth**: Required
-- **Body**: `{ "name": "Product Name", "description": "Description", "price": 29.99, "shopId": 1 }`
+- **Body**: `{ "name": "Product Name", "description": "Description", "category": "Hoodies", "gender": "Unisex", "audience": "Adults", "sizes": ["S", "M", "L"], "rating": 4.5, "price": 29.99, "shopId": 1 }`
 - **Response**: Created product data
 
 #### Update Product
 - **PUT** `/api/products/:id`
 - **Auth**: Required
-- **Body**: `{ "name": "Updated Name", "description": "Updated description", "price": 39.99 }`
+- **Body**: `{ "name": "Updated Name", "description": "Updated description", "category": "T-Shirts", "gender": "Men", "audience": "Kids", "sizes": ["M", "L"], "rating": 4.8, "price": 39.99 }`
 - **Response**: Updated product data
 
 #### Upload Product Image

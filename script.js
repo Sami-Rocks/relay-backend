@@ -18,6 +18,11 @@ const seedShops = [
 			{
 				name: "Relaxed Cotton Hoodie",
 				description: "Soft heavyweight hoodie with a relaxed streetwear fit.",
+				category: "Hoodies",
+				gender: "Unisex",
+				audience: "Adults",
+				sizes: ["S", "M", "L", "XL"],
+				rating: 4.6,
 				price: 89.99,
 				imageUrl: "https://images.unsplash.com/photo-1556821840-3a63f95609a7?auto=format&fit=crop&w=900&q=80",
 				imagePublicId: "seed/relaxed-cotton-hoodie"
@@ -25,6 +30,11 @@ const seedShops = [
 			{
 				name: "Boxy Denim Jacket",
 				description: "Structured denim jacket with dropped shoulders.",
+				category: "Sweatshirts",
+				gender: "Men",
+				audience: "Adults",
+				sizes: ["M", "L", "XL"],
+				rating: 4.8,
 				price: 129.99,
 				imageUrl: "https://images.unsplash.com/photo-1543076447-215ad9ba6923?auto=format&fit=crop&w=900&q=80",
 				imagePublicId: "seed/boxy-denim-jacket"
@@ -32,6 +42,11 @@ const seedShops = [
 			{
 				name: "Classic White Tee",
 				description: "Premium cotton tee with a clean crew neckline.",
+				category: "T-Shirts",
+				gender: "Unisex",
+				audience: "Kids",
+				sizes: ["XS", "S", "M", "L", "XL"],
+				rating: 4.4,
 				price: 34.99,
 				imageUrl: "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?auto=format&fit=crop&w=900&q=80",
 				imagePublicId: "seed/classic-white-tee"
@@ -47,6 +62,11 @@ const seedShops = [
 			{
 				name: "Satin Slip Dress",
 				description: "Minimal satin dress with an elegant drape.",
+				category: "Shorts",
+				gender: "Women",
+				audience: "Adults",
+				sizes: ["XS", "S", "M", "L"],
+				rating: 4.7,
 				price: 149.99,
 				imageUrl: "https://images.unsplash.com/photo-1539008835657-9e8e9680c956?auto=format&fit=crop&w=900&q=80",
 				imagePublicId: "seed/satin-slip-dress"
@@ -54,6 +74,11 @@ const seedShops = [
 			{
 				name: "Tailored Blazer",
 				description: "Single-breasted blazer with a sharp modern cut.",
+				category: "Sweatshirts",
+				gender: "Women",
+				audience: "Adults",
+				sizes: ["S", "M", "L"],
+				rating: 4.9,
 				price: 179.99,
 				imageUrl: "https://images.unsplash.com/photo-1591369822096-ffd140ec948f?auto=format&fit=crop&w=900&q=80",
 				imagePublicId: "seed/tailored-blazer"
@@ -61,6 +86,11 @@ const seedShops = [
 			{
 				name: "Pleated Wide-Leg Trouser",
 				description: "High-rise trouser with soft pleats and a fluid leg.",
+				category: "Pants",
+				gender: "Men",
+				audience: "Kids",
+				sizes: ["S", "M", "L", "XL"],
+				rating: 4.5,
 				price: 119.99,
 				imageUrl: "https://images.unsplash.com/photo-1594633312681-425c7b97ccd1?auto=format&fit=crop&w=900&q=80",
 				imagePublicId: "seed/pleated-wide-leg-trouser"

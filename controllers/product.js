@@ -1,7 +1,7 @@
 // Modules
 const { deleteImage, uploadImage } = require("../lib/cloudinary")
 const prisma = require("../lib/prisma")
-const { hasOwn, parseAmount, parseId } = require("../utils/request")
+const { hasOwn, parseAmount, parseId, parseList } = require("../utils/request")
 
 // Variables
 const shopSummary = {
@@ -15,15 +15,136 @@ const productWithShop = {
 	}
 }
 
+const productSorts = {
+	newest: { createdAt: "desc" },
+	oldest: { createdAt: "asc" },
+	price_asc: { price: "asc" },
+	price_desc: { price: "desc" },
+	rating_desc: { rating: "desc" }
+}
+
+// Function: Build Product Filters
+function buildProductFilters (query) {
+	const categories = parseList(query.category || query.categories)
+	const genders = parseList(query.gender || query.genders)
+	const audiences = parseList(query.audience || query.audiences)
+	const sizes = parseList(query.size || query.sizes)
+	const shopId = parseId(query.shopId)
+	const minPrice = hasOwn(query, "minPrice") ? parseAmount(query.minPrice) : undefined
+	const maxPrice = hasOwn(query, "maxPrice") ? parseAmount(query.maxPrice) : undefined
+	const minRating = hasOwn(query, "minRating") ? parseAmount(query.minRating) : undefined
+	const search = query.search || query.q
+	const where = {
+		AND: []
+	}
+
+	if (search) {
+		where.AND.push({
+			OR: [
+				{ name: { contains: search, mode: "insensitive" } },
+				{ description: { contains: search, mode: "insensitive" } },
+				{ shop: { name: { contains: search, mode: "insensitive" } } }
+			]
+		})
+	}
+
+	if (categories.length) {
+		where.AND.push({
+			OR: categories.map((category) => ({
+				category: {
+					equals: category,
+					mode: "insensitive"
+				}
+			}))
+		})
+	}
+
+	if (genders.length) {
+		where.AND.push({
+			OR: genders.map((gender) => ({
+				gender: {
+					equals: gender,
+					mode: "insensitive"
+				}
+			}))
+		})
+	}
+
+	if (audiences.length) {
+		where.AND.push({
+			OR: audiences.map((audience) => ({
+				audience: {
+					equals: audience,
+					mode: "insensitive"
+				}
+			}))
+		})
+	}
+
+	if (sizes.length) {
+		where.sizes = { hasSome: sizes }
+	}
+
+	if (shopId) {
+		where.shopId = shopId
+	}
+
+	if (minPrice !== undefined || maxPrice !== undefined) {
+		where.price = {}
+		if (minPrice !== undefined) where.price.gte = minPrice
+		if (maxPrice !== undefined) where.price.lte = maxPrice
+	}
+
+	if (minRating !== undefined) {
+		where.rating = { gte: minRating }
+	}
+
+	if (!where.AND.length) {
+		delete where.AND
+	}
+
+	return {
+		maxPrice,
+		minPrice,
+		minRating,
+		where
+	}
+}
+
 // Controller: Get Products
 async function getProducts (req, res) {
 	try {
+		const { maxPrice, minPrice, minRating, where } = buildProductFilters(req.query)
+		const sort = productSorts[req.query.sort] || productSorts.newest
+		const page = parseId(req.query.page) || 1
+		const limit = parseId(req.query.limit) || 20
+
+		if (minPrice === null || maxPrice === null || minRating === null) {
+			return res.status(400).json({ message: "Invalid product filter values" })
+		}
+
 		const products = await prisma.product.findMany({
+			where,
 			include: productWithShop,
-			orderBy: {
-				createdAt: "desc"
-			}
+			orderBy: sort,
+			skip: (page - 1) * limit,
+			take: Math.min(limit, 100)
 		})
+
+		if (req.query.withMeta === "true") {
+			const total = await prisma.product.count({ where })
+
+			return res.json({
+				data: products,
+				meta: {
+					page,
+					limit,
+					total,
+					totalPages: Math.ceil(total / limit)
+				}
+			})
+		}
+
 		res.json(products)
 	} catch (error) {
 		res.status(500).json({ message: "Error fetching products", error: error.message })
@@ -56,12 +177,14 @@ async function getProduct (req, res) {
 // Controller: Create Product
 async function createProduct (req, res) {
 	try {
-		const { name, description, price, shopId } = req.body
+		const { name, description, category, gender, audience, price, rating, shopId } = req.body
 		const userId = req.user.userId
 		const parsedShopId = parseId(shopId)
 		const parsedPrice = parseAmount(price)
+		const parsedRating = hasOwn(req.body, "rating") ? parseAmount(rating) : 0
+		const sizes = parseList(req.body.sizes)
 
-		if (!name || !parsedShopId || parsedPrice === null) {
+		if (!name || !parsedShopId || parsedPrice === null || parsedRating === null) {
 			return res.status(400).json({ message: "Name, valid price, and valid shopId are required" })
 		}
 
@@ -83,6 +206,11 @@ async function createProduct (req, res) {
 			data: {
 				name,
 				description,
+				category,
+				gender,
+				audience,
+				sizes,
+				rating: parsedRating,
 				price: parsedPrice,
 				shopId: parsedShopId
 			},
@@ -98,16 +226,27 @@ async function createProduct (req, res) {
 async function updateProduct (req, res) {
 	try {
 		const { id } = req.params
-		const { name, description, price } = req.body
+		const { name, description, category, gender, audience, price, rating } = req.body
 		const userId = req.user.userId
 		const productId = parseId(id)
 		const parsedPrice = hasOwn(req.body, "price") ? parseAmount(price) : undefined
+		const parsedRating = hasOwn(req.body, "rating") ? parseAmount(rating) : undefined
+		const sizes = hasOwn(req.body, "sizes") ? parseList(req.body.sizes) : undefined
 
-		if (!productId || parsedPrice === null) {
-			return res.status(400).json({ message: "Invalid product id or price" })
+		if (!productId || parsedPrice === null || parsedRating === null) {
+			return res.status(400).json({ message: "Invalid product id, price, or rating" })
 		}
 
-		if (!hasOwn(req.body, "name") && !hasOwn(req.body, "description") && !hasOwn(req.body, "price")) {
+		if (
+			!hasOwn(req.body, "name")
+			&& !hasOwn(req.body, "description")
+			&& !hasOwn(req.body, "category")
+			&& !hasOwn(req.body, "gender")
+			&& !hasOwn(req.body, "audience")
+			&& !hasOwn(req.body, "sizes")
+			&& !hasOwn(req.body, "rating")
+			&& !hasOwn(req.body, "price")
+		) {
 			return res.status(400).json({ message: "No product changes provided" })
 		}
 
@@ -132,6 +271,11 @@ async function updateProduct (req, res) {
 			data: {
 				name: hasOwn(req.body, "name") ? name : undefined,
 				description: hasOwn(req.body, "description") ? description : undefined,
+				category: hasOwn(req.body, "category") ? category : undefined,
+				gender: hasOwn(req.body, "gender") ? gender : undefined,
+				audience: hasOwn(req.body, "audience") ? audience : undefined,
+				sizes,
+				rating: parsedRating,
 				price: parsedPrice
 			},
 			include: productWithShop

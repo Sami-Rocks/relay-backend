@@ -43,6 +43,11 @@ model Product {
 	id            Int      @id @default(autoincrement())
 	name          String
 	description   String?
+	category      String?
+	gender        String?
+	audience      String?
+	sizes         String[] @default([])
+	rating        Float    @default(0)
 	price         Float
 	imageUrl      String?
 	imagePublicId String?
@@ -53,6 +58,11 @@ model Product {
 	orders        Order[]
 
 	@@index([shopId])
+	@@index([category])
+	@@index([gender])
+	@@index([audience])
+	@@index([price])
+	@@index([rating])
 }
 
 model Order {
