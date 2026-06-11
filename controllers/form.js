@@ -34,6 +34,7 @@ const formInclude = {
 const formKinds = ["FORM", "POLL", "SURVEY"]
 const formStatuses = ["DRAFT", "PUBLISHED", "ARCHIVED"]
 const fieldTypes = ["SHORT_TEXT", "LONG_TEXT", "MULTIPLE_CHOICE"]
+const duplicateProtections = ["NONE", "BROWSER", "LOGIN"]
 
 // Function: Normalize Enum
 function normalizeEnum (value) {
@@ -41,6 +42,11 @@ function normalizeEnum (value) {
 		.trim()
 		.replaceAll("-", "_")
 		.toUpperCase()
+}
+
+// Function: Normalize Duplicate Protection
+function normalizeDuplicateProtection (value) {
+	return normalizeEnum(value || "BROWSER")
 }
 
 // Function: Build Form Where
@@ -73,7 +79,7 @@ function buildFieldsData (fields = [], kind = "FORM") {
 			label: field.label.trim(),
 			order: parseId(field.order) || index + 1,
 			placeholder: field.placeholder || null,
-			required: Boolean(field.required),
+			required: kind === "POLL" ? true : Boolean(field.required),
 			type,
 			options: {
 				create: type === "MULTIPLE_CHOICE"
@@ -88,9 +94,34 @@ function buildFieldsData (fields = [], kind = "FORM") {
 	})
 
 	if (normalizedFields.some((field) => field === null)) return null
-	if (kind === "POLL" && normalizedFields.some((field) => field.type !== "MULTIPLE_CHOICE")) return null
 
 	return normalizedFields
+}
+
+// Function: Validate Kind Rules
+function validateKindRules (kind, fields = []) {
+	if (!fields.length) return "At least one question is required"
+
+	if (kind === "POLL") {
+		if (fields.length !== 1) return "Polls can only have one question"
+		if (fields[0].type !== "MULTIPLE_CHOICE") return "Polls must use a multiple choice question"
+		if (fields[0].options.create.length < 2) return "Polls must have at least two options"
+	}
+
+	return null
+}
+
+// Function: Validate Submission Rules
+function validateSubmissionRules (data) {
+	if (data.requireLogin && data.allowAnonymous) {
+		return "Forms that require login cannot allow anonymous submissions"
+	}
+
+	if (data.duplicateProtection && !duplicateProtections.includes(data.duplicateProtection)) {
+		return "Invalid duplicate protection"
+	}
+
+	return null
 }
 
 // Function: Build Form Data
@@ -98,6 +129,9 @@ function buildFormData (body, userId, isCreate = false) {
 	const data = {}
 	const kind = hasOwn(body, "kind") ? normalizeEnum(body.kind) : "FORM"
 	const status = hasOwn(body, "status") ? normalizeEnum(body.status) : undefined
+	const duplicateProtection = hasOwn(body, "duplicateProtection")
+		? normalizeDuplicateProtection(body.duplicateProtection)
+		: undefined
 
 	if (isCreate) data.userId = userId
 	if (hasOwn(body, "kind")) data.kind = kind
@@ -105,10 +139,31 @@ function buildFormData (body, userId, isCreate = false) {
 	if (hasOwn(body, "icon")) data.icon = body.icon
 	if (hasOwn(body, "title")) data.title = body.title
 	if (hasOwn(body, "description")) data.description = body.description
+	if (hasOwn(body, "requireLogin")) data.requireLogin = Boolean(body.requireLogin)
 	if (hasOwn(body, "allowAnonymous")) data.allowAnonymous = Boolean(body.allowAnonymous)
-	if (hasOwn(body, "allowMultipleVotes")) data.allowMultipleVotes = Boolean(body.allowMultipleVotes)
+	if (hasOwn(body, "allowMultipleSubmissions")) {
+		data.allowMultipleSubmissions = Boolean(body.allowMultipleSubmissions)
+		data.allowMultipleVotes = Boolean(body.allowMultipleSubmissions)
+	}
+	if (hasOwn(body, "allowMultipleVotes")) {
+		data.allowMultipleSubmissions = Boolean(body.allowMultipleVotes)
+		data.allowMultipleVotes = Boolean(body.allowMultipleVotes)
+	}
+	if (hasOwn(body, "duplicateProtection")) data.duplicateProtection = duplicateProtection
+	if (isCreate) {
+		if (!hasOwn(body, "allowAnonymous")) data.allowAnonymous = data.requireLogin ? false : true
+		if (!hasOwn(body, "allowMultipleSubmissions") && !hasOwn(body, "allowMultipleVotes")) {
+			data.allowMultipleSubmissions = false
+			data.allowMultipleVotes = false
+		}
+		if (!hasOwn(body, "duplicateProtection")) data.duplicateProtection = "BROWSER"
+	}
 
-	if ((hasOwn(body, "kind") && !formKinds.includes(kind)) || (hasOwn(body, "status") && !formStatuses.includes(status))) {
+	if (
+		(hasOwn(body, "kind") && !formKinds.includes(kind)) ||
+		(hasOwn(body, "status") && !formStatuses.includes(status)) ||
+		(hasOwn(body, "duplicateProtection") && !duplicateProtections.includes(duplicateProtection))
+	) {
 		return null
 	}
 
@@ -242,9 +297,14 @@ async function createForm (req, res) {
 		const formData = buildFormData(req.body, req.user.userId, true)
 		const kind = formData?.kind || "FORM"
 		const fields = buildFieldsData(req.body.fields || [], kind)
+		const kindError = fields ? validateKindRules(kind, fields) : null
+		const submissionRulesError = formData ? validateSubmissionRules(formData) : null
 
 		if (!formData || !formData.title || !fields) {
 			return res.status(400).json({ message: "Title and valid fields are required" })
+		}
+		if (kindError || submissionRulesError) {
+			return res.status(400).json({ message: kindError || submissionRulesError })
 		}
 
 		const form = await prisma.form.create({
@@ -355,7 +415,10 @@ async function updateForm (req, res) {
 			where: buildFormWhere(req.user, formId),
 			select: {
 				id: true,
-				kind: true
+				kind: true,
+				requireLogin: true,
+				allowAnonymous: true,
+				duplicateProtection: true
 			}
 		})
 		if (!existingForm) {
@@ -366,6 +429,13 @@ async function updateForm (req, res) {
 		const kind = formData?.kind || existingForm.kind
 		const shouldUpdateFields = hasOwn(req.body, "fields")
 		const fields = shouldUpdateFields ? buildFieldsData(req.body.fields, kind) : undefined
+		const nextRules = {
+			requireLogin: formData.requireLogin ?? existingForm.requireLogin,
+			allowAnonymous: formData.allowAnonymous ?? existingForm.allowAnonymous,
+			duplicateProtection: formData.duplicateProtection ?? existingForm.duplicateProtection
+		}
+		const kindError = fields ? validateKindRules(kind, fields) : null
+		const submissionRulesError = validateSubmissionRules(nextRules)
 
 		if (!formData || fields === null) {
 			return res.status(400).json({ message: "Invalid form data" })
@@ -373,6 +443,9 @@ async function updateForm (req, res) {
 
 		if (Object.keys(formData).length === 0 && !shouldUpdateFields) {
 			return res.status(400).json({ message: "No form changes provided" })
+		}
+		if (kindError || submissionRulesError) {
+			return res.status(400).json({ message: kindError || submissionRulesError })
 		}
 
 		const form = await prisma.form.update({

@@ -1,4 +1,5 @@
 // Modules
+const crypto = require("crypto")
 const prisma = require("../lib/prisma")
 const { parseId } = require("../utils/request")
 
@@ -40,6 +41,26 @@ function normalizeAnswers (answers) {
 		fieldId: parseId(answer.fieldId),
 		value: answer.value
 	}))
+}
+
+// Function: Get Anonymous Token
+function getAnonymousToken (req) {
+	return req.body.anonymousToken || req.headers["x-anonymous-token"] || null
+}
+
+// Function: Hash Anonymous Token
+function hashAnonymousToken (token) {
+	if (!token || typeof token !== "string") return null
+
+	return crypto
+		.createHash("sha256")
+		.update(token)
+		.digest("hex")
+}
+
+// Function: Allows Multiple Submissions
+function allowsMultipleSubmissions (form) {
+	return Boolean(form.allowMultipleSubmissions || form.allowMultipleVotes)
 }
 
 // Function: Validate Answers
@@ -97,9 +118,10 @@ async function findPublicForm (formId) {
 }
 
 // Function: Create Submission
-async function createSubmissionData (form, answers, respondentId) {
+async function createSubmissionData (form, answers, respondentId, anonymousTokenHash) {
 	return prisma.formSubmission.create({
 		data: {
+			anonymousTokenHash,
 			formId: form.id,
 			respondentId,
 			answers: {
@@ -111,6 +133,35 @@ async function createSubmissionData (form, answers, respondentId) {
 		},
 		include: submissionInclude
 	})
+}
+
+// Function: Find Existing Submission
+async function findExistingSubmission (formId, respondentId, anonymousTokenHash) {
+	if (respondentId) {
+		return prisma.formSubmission.findFirst({
+			where: {
+				formId,
+				respondentId
+			},
+			select: {
+				id: true
+			}
+		})
+	}
+
+	if (anonymousTokenHash) {
+		return prisma.formSubmission.findFirst({
+			where: {
+				anonymousTokenHash,
+				formId
+			},
+			select: {
+				id: true
+			}
+		})
+	}
+
+	return null
 }
 
 // Controller: Get Form Submissions
@@ -165,20 +216,22 @@ async function submitForm (req, res) {
 			return res.status(404).json({ message: "Form not found" })
 		}
 
-		if (!form.allowAnonymous && !req.user?.userId) {
+		if ((form.requireLogin || !form.allowAnonymous) && !req.user?.userId) {
 			return res.status(401).json({ message: "Authentication required" })
 		}
 
-		if (!form.allowMultipleVotes && req.user?.userId) {
-			const existingSubmission = await prisma.formSubmission.findFirst({
-				where: {
-					formId,
-					respondentId: req.user.userId
-				},
-				select: {
-					id: true
-				}
-			})
+		const respondentId = req.user?.userId || null
+		const anonymousTokenHash = respondentId ? null : hashAnonymousToken(getAnonymousToken(req))
+
+		if (!allowsMultipleSubmissions(form)) {
+			if (!respondentId && form.duplicateProtection === "LOGIN") {
+				return res.status(401).json({ message: "Login is required to prevent duplicate submissions" })
+			}
+			if (!respondentId && form.duplicateProtection === "BROWSER" && !anonymousTokenHash) {
+				return res.status(400).json({ message: "Anonymous submission token is required" })
+			}
+
+			const existingSubmission = await findExistingSubmission(formId, respondentId, anonymousTokenHash)
 
 			if (existingSubmission) {
 				return res.status(400).json({ message: "You have already submitted this form" })
@@ -192,7 +245,7 @@ async function submitForm (req, res) {
 			return res.status(400).json({ message: validationError })
 		}
 
-		const submission = await createSubmissionData(form, answers, req.user?.userId || null)
+		const submission = await createSubmissionData(form, answers, respondentId, anonymousTokenHash)
 
 		res.status(201).json(submission)
 	} catch (error) {
