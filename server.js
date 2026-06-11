@@ -1,6 +1,11 @@
 const cors = require("cors")
 const express = require("express")
+const multer = require("multer")
 require("dotenv").config()
+
+// Routes
+const formRoutes = require("./routes/form")
+const userRoutes = require("./routes/user")
 
 const app = express()
 
@@ -18,6 +23,17 @@ app.get("/health", (req, res) => {
 	res.json({
 		status: "ok"
 	})
+})
+
+app.use("/api/forms", formRoutes)
+app.use("/api/users", userRoutes)
+
+app.use((err, req, res, next) => {
+	if (err instanceof multer.MulterError || err.message?.includes("images are allowed")) {
+		return res.status(400).json({ message: err.message })
+	}
+
+	next(err)
 })
 
 app.use((req, res) => {
