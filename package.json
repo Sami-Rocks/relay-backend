@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "node server.js",
     "seed": "node prisma/seed.js",
+    "seed:surveys:api": "node prisma/seed-surveys-api.js",
+    "seed:surveys": "node prisma/seed-surveys.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "prisma": {

@@ -1,4 +1,5 @@
 // Modules
+const { Prisma } = require("@prisma/client")
 const crypto = require("crypto")
 const prisma = require("../lib/prisma")
 const { parseId } = require("../utils/request")
@@ -6,21 +7,12 @@ const { parseId } = require("../utils/request")
 // Variables
 const submissionInclude = {
 	answers: {
-		include: {
-			field: {
-				select: {
-					id: true,
-					label: true,
-					type: true
-				}
-			}
-		}
-	},
-	form: {
 		select: {
+			createdAt: true,
+			fieldId: true,
 			id: true,
-			title: true,
-			kind: true
+			updatedAt: true,
+			value: true
 		}
 	},
 	respondent: {
@@ -30,6 +22,19 @@ const submissionInclude = {
 			firstName: true,
 			lastName: true
 		}
+	}
+}
+
+// Function: Parse Submission Query
+function parseSubmissionQuery (query) {
+	const includeSummary = query.summary !== "false"
+	const includeSubmissions = query.submissions !== "false"
+	const sort = query.sort === "oldest" ? "oldest" : "newest"
+
+	return {
+		includeSubmissions,
+		includeSummary,
+		sort
 	}
 }
 
@@ -164,10 +169,157 @@ async function findExistingSubmission (formId, respondentId, anonymousTokenHash)
 	return null
 }
 
+// Function: Normalize Summary Text
+function normalizeSummaryText (value) {
+	if (Array.isArray(value)) return value.filter(Boolean).join(", ")
+	if (value === null || value === undefined || value === "") return ""
+
+	return String(value)
+}
+
+// Function: Find Submissions
+async function findSubmissions (formId, params) {
+	const sortDirection = params.sort === "oldest" ? Prisma.sql`ASC` : Prisma.sql`DESC`
+
+	return prisma.$queryRaw`
+		SELECT
+			fs.id,
+			fs."formId",
+			fs."respondentId",
+			fs."anonymousTokenHash",
+			fs."createdAt",
+			fs."updatedAt",
+			CASE
+				WHEN u.id IS NULL THEN NULL
+				ELSE json_build_object(
+					'id', u.id,
+					'email', u.email,
+					'firstName', u."firstName",
+					'lastName', u."lastName"
+				)
+			END AS respondent,
+			COALESCE(
+				json_agg(
+					json_build_object(
+						'id', fa.id,
+						'fieldId', fa."fieldId",
+						'value', fa.value,
+						'createdAt', fa."createdAt",
+						'updatedAt', fa."updatedAt"
+					)
+					ORDER BY fa.id ASC
+				) FILTER (WHERE fa.id IS NOT NULL),
+				'[]'
+			) AS answers
+		FROM "FormSubmission" fs
+		LEFT JOIN "User" u ON u.id = fs."respondentId"
+		LEFT JOIN "FormAnswer" fa ON fa."submissionId" = fs.id
+		WHERE fs."formId" = ${formId}
+		GROUP BY fs.id, u.id
+		ORDER BY fs."createdAt" ${sortDirection}, fs.id ${sortDirection}
+	`
+}
+
+// Function: Build Submission Summary
+async function buildSubmissionSummary (form) {
+	const fieldIds = form.fields.map((field) => field.id)
+	const [submissionStats, answers] = await Promise.all([
+		prisma.$queryRaw`
+			SELECT
+				COUNT(*)::int AS total,
+				COUNT("respondentId")::int AS registered,
+				MIN("createdAt") AS start,
+				MAX("createdAt") AS "end"
+			FROM "FormSubmission"
+			WHERE "formId" = ${form.id}
+		`,
+		fieldIds.length
+			? prisma.formAnswer.findMany({
+				where: {
+					fieldId: {
+						in: fieldIds
+					}
+				},
+				select: {
+					fieldId: true,
+					id: true,
+					value: true
+				}
+			})
+			: []
+	])
+	const stats = submissionStats[0] || {
+		end: null,
+		registered: 0,
+		start: null,
+		total: 0
+	}
+	const answersByField = answers.reduce((groups, answer) => {
+		const group = groups.get(answer.fieldId) || []
+
+		group.push(answer)
+		groups.set(answer.fieldId, group)
+
+		return groups
+	}, new Map())
+	const choices = form.fields
+		.filter((field) => field.type === "MULTIPLE_CHOICE")
+		.map((field) => {
+			const counts = new Map(field.options.map((option) => [option.value, 0]))
+			const fieldAnswers = answersByField.get(field.id) || []
+
+			fieldAnswers.forEach((answer) => {
+				const values = Array.isArray(answer.value) ? answer.value : [answer.value]
+
+				values.filter(Boolean).forEach((value) => {
+					if (counts.has(value)) {
+						counts.set(value, counts.get(value) + 1)
+					}
+				})
+			})
+
+			return {
+				fieldId: field.id,
+				options: field.options.map((option) => ({
+					count: counts.get(option.value) || 0,
+					label: option.value
+				}))
+			}
+		})
+	const text = form.fields
+		.filter((field) => field.type !== "MULTIPLE_CHOICE")
+		.map((field) => {
+			const responses = (answersByField.get(field.id) || [])
+				.map((answer) => ({
+					answerId: answer.id,
+					value: normalizeSummaryText(answer.value)
+				}))
+				.filter((answer) => answer.value)
+
+			return {
+				fieldId: field.id,
+				responses
+			}
+		})
+
+	return {
+		anonymousSubmissions: stats.total - stats.registered,
+		choices,
+		dateRange: {
+			end: stats.end,
+			start: stats.start
+		},
+		registeredSubmissions: stats.registered,
+		text,
+		totalSubmissions: stats.total
+	}
+}
+
 // Controller: Get Form Submissions
 async function getFormSubmissions (req, res) {
 	try {
 		const formId = parseId(req.params.formId)
+		const params = parseSubmissionQuery(req.query)
 
 		if (!formId) {
 			return res.status(400).json({ message: "Invalid form id" })
@@ -178,25 +330,42 @@ async function getFormSubmissions (req, res) {
 				id: formId,
 				userId: req.user.userId
 			},
-			select: {
-				id: true
-			}
+			...(params.includeSummary
+				? {
+					include: {
+						fields: {
+							include: {
+								options: {
+									orderBy: {
+										order: "asc"
+									}
+								}
+							},
+							orderBy: {
+								order: "asc"
+							}
+						}
+					}
+				}
+				: {
+					select: {
+						id: true
+					}
+				})
 		})
 		if (!form) {
 			return res.status(404).json({ message: "Form not found" })
 		}
 
-		const submissions = await prisma.formSubmission.findMany({
-			where: {
-				formId
-			},
-			include: submissionInclude,
-			orderBy: {
-				createdAt: "desc"
-			}
-		})
+		const [submissions, summary] = await Promise.all([
+			params.includeSubmissions ? findSubmissions(formId, params) : Promise.resolve([]),
+			params.includeSummary ? buildSubmissionSummary(form) : Promise.resolve(null)
+		])
 
-		res.json(submissions)
+		res.json({
+			submissions,
+			summary
+		})
 	} catch (error) {
 		res.status(500).json({ message: "Error fetching submissions", error: error.message })
 	}

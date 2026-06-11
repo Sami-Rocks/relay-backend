@@ -5,12 +5,62 @@ const bcrypt = require("bcryptjs")
 const prisma = require("../lib/prisma")
 
 const SEED_PASSWORD = "password123"
-const MINISTRIES = ["Hospitality", "Music", "Media", "Children", "Prayer", "Outreach"]
-const TICKET_TYPES = ["General", "Volunteer", "VIP"]
+const CONCURRENCY = 25
+
+const MINISTRIES = ["Hospitality", "Music", "Media", "Children", "Prayer", "Outreach", "Ushering", "Care"]
+const TICKET_TYPES = ["General", "Volunteer", "VIP", "Student", "Partner"]
 const SERVICE_TIMES = ["8:00 AM", "10:00 AM", "12:00 PM", "5:00 PM"]
-const WORSHIP_STYLES = ["Acoustic", "Choir", "Full band", "Spoken word"]
+const WORSHIP_STYLES = ["Acoustic", "Choir", "Full band", "Spoken word", "Hymns"]
 const RATINGS = ["Excellent", "Good", "Okay", "Needs work"]
 const YES_MAYBE_NO = ["Yes", "Maybe", "No"]
+
+const FIRST_NAMES = [
+	"Ama", "Kojo", "Efua", "Nana", "Abena", "Kofi", "Esi", "Yaw", "Akua", "Kwesi",
+	"Adjoa", "Fiifi", "Mansa", "Selorm", "Afia", "Kwaku", "Ekua", "Kobby", "Dzifa", "Yaa",
+	"Elikem", "Sena", "Kafui", "Nii", "Araba", "Kwabena", "Serwaa", "Ato", "Dede", "Kweku"
+]
+const LAST_NAMES = [
+	"Boateng", "Mensah", "Owusu", "Appiah", "Darko", "Addo", "Asante", "Sarpong", "Tetteh", "Ofori",
+	"Baah", "Agyeman", "Quaye", "Dartey", "Arthur", "Bonsu", "Danso", "Amponsah", "Acheampong", "Annan"
+]
+const TEAMS = ["welcome", "media", "children", "hospitality", "prayer", "parking", "music", "cleanup", "security", "follow-up"]
+const AREAS = ["lobby", "auditorium", "children's room", "welcome desk", "parking lane", "media booth", "prayer corner", "registration table"]
+const POSITIVE_OUTCOMES = [
+	"guests found help quickly",
+	"volunteers knew their roles",
+	"handoffs were calmer",
+	"families moved through check-in faster",
+	"team leads had fewer questions",
+	"new volunteers felt included",
+	"service transitions felt smoother",
+	"follow-up conversations were easier"
+]
+const IMPROVEMENTS = [
+	"send the briefing earlier",
+	"print larger directional signs",
+	"add another water station",
+	"prepare a backup microphone",
+	"share parking instructions sooner",
+	"label supply boxes more clearly",
+	"assign a floating support lead",
+	"keep extra pens at check-in",
+	"start rehearsal earlier",
+	"publish cleanup zones before service"
+]
+const WORKSHOP_TOPICS = [
+	"volunteer scheduling",
+	"guest follow-up",
+	"care request workflows",
+	"small team media systems",
+	"usher training",
+	"new volunteer onboarding",
+	"welcome team culture",
+	"event budgeting",
+	"survey analysis",
+	"registration form design",
+	"equipment planning",
+	"team leader coaching"
+]
 
 const SEED_USERS = [
 	{
@@ -42,6 +92,16 @@ const SEED_USERS = [
 		email: "yaw@relay.test",
 		firstName: "Yaw",
 		lastName: "Appiah"
+	},
+	{
+		email: "esi@relay.test",
+		firstName: "Esi",
+		lastName: "Asante"
+	},
+	{
+		email: "nii@relay.test",
+		firstName: "Nii",
+		lastName: "Quaye"
 	}
 ]
 
@@ -49,9 +109,8 @@ function cycle (items, index) {
 	return items[index % items.length]
 }
 
-function daysAgo (days, minutes = 0) {
+function minutesAgo (minutes) {
 	const date = new Date()
-	date.setDate(date.getDate() - days)
 	date.setMinutes(date.getMinutes() - minutes)
 
 	return date
@@ -64,10 +123,14 @@ function hashAnonymousToken (value) {
 		.digest("hex")
 }
 
+function fullName (index) {
+	return `${cycle(FIRST_NAMES, index)} ${cycle(LAST_NAMES, Math.floor(index / FIRST_NAMES.length) + index)}`
+}
+
 function namedSubmission (respondent, answers, index = 0) {
 	return {
 		answers,
-		createdAt: daysAgo(index % 12, index * 7),
+		createdAt: minutesAgo(90 + index * 11),
 		respondent
 	}
 }
@@ -76,42 +139,63 @@ function anonymousSubmission (answers, index = 0) {
 	return {
 		anonymousTokenHash: hashAnonymousToken(`relay-seed-anonymous-${index}`),
 		answers,
-		createdAt: daysAgo(index % 12, index * 7)
+		createdAt: minutesAgo(90 + index * 11)
 	}
+}
+
+function uniqueNote (prefix, index, focus) {
+	return `${prefix} ${index + 1}: ${focus} in the ${cycle(AREAS, index)} helped the ${cycle(TEAMS, index)} team during service ${1000 + index}.`
+}
+
+function createSubmission (answers, index, offset = 0, respondentEvery = 0) {
+	const respondentEmails = SEED_USERS
+		.map((user) => user.email)
+		.filter((email) => email !== "owner@relay.test")
+	const respondent = respondentEvery && index % respondentEvery === 0
+		? cycle(respondentEmails, index)
+		: null
+
+	return respondent
+		? namedSubmission(respondent, answers, index + offset)
+		: anonymousSubmission(answers, index + offset)
 }
 
 function generateMembershipSubmissions (count) {
 	return Array.from({ length: count }, (_, index) => {
-		const firstNames = ["Ama", "Kojo", "Efua", "Nana", "Abena", "Kofi", "Esi", "Yaw", "Akua", "Kwesi"]
-		const lastNames = ["Boateng", "Mensah", "Owusu", "Appiah", "Darko", "Addo", "Asante", "Sarpong"]
-		const fullName = `${cycle(firstNames, index)} ${cycle(lastNames, index)}`
-		const respondent = index % 5 === 0 ? "respondent@relay.test" : null
-		const answers = {
-			"Full name": fullName,
-			"Phone number": `+233 24 10${String(index).padStart(3, "0")}`,
-			"Preferred ministry": cycle(MINISTRIES, index),
-			"Prayer request": index % 4 === 0
-				? "Praying for direction and consistency this season."
-				: ""
-		}
+		const name = fullName(index)
+		const ministry = cycle(MINISTRIES, index)
+		const request = index % 5 === 0
+			? uniqueNote("Prayer request", index, `guidance while joining ${ministry.toLowerCase()}`)
+			: uniqueNote("Short note", index, `interest in ${ministry.toLowerCase()} ministry`)
 
-		return respondent
-			? namedSubmission(respondent, answers, index)
-			: anonymousSubmission(answers, index)
+		return createSubmission({
+			"Full name": name,
+			"Phone number": `+233 24 ${String(500000 + index).padStart(6, "0")}`,
+			"Preferred ministry": ministry,
+			"Prayer request": request
+		}, index, 0, 7)
 	})
 }
 
 function generateEventRegistrationSubmissions (count) {
 	return Array.from({ length: count }, (_, index) => {
-		const answers = {
-			"Attendee name": `Guest ${index + 1}`,
-			"Email address": `guest${index + 1}@example.com`,
-			"Ticket type": cycle(TICKET_TYPES, index),
-			"Accessibility notes": index % 9 === 0 ? "Needs front-row seating." : ""
-		}
+		const attendeeName = fullName(index + 400)
+		const ticketType = cycle(TICKET_TYPES, index)
 
-		return anonymousSubmission(answers, index + 200)
+		return createSubmission({
+			"Attendee name": attendeeName,
+			"Email address": `guest.${index + 1}.${ticketType.toLowerCase()}@example.com`,
+			"Ticket type": ticketType,
+			"Accessibility notes": uniqueNote("Registration note", index, `${ticketType.toLowerCase()} check-in`)
+		}, index, 500, 9)
 	})
+}
+
+function generateLeaderCheckInSubmissions (count) {
+	return Array.from({ length: count }, (_, index) => createSubmission({
+		"Leader name": fullName(index + 800),
+		"Team update": uniqueNote("Leader update", index, `progress for ${cycle(TEAMS, index)}`)
+	}, index, 900, 1))
 }
 
 function generatePollSubmissions (question, options, weights, count, offset = 0) {
@@ -122,30 +206,37 @@ function generatePollSubmissions (question, options, weights, count, offset = 0)
 	}, index + offset))
 }
 
-function generateSurveySubmissions (count) {
-	return Array.from({ length: count }, (_, index) => {
-		const respondent = index % 4 === 0 ? cycle(["ama@relay.test", "kwame@relay.test", "akosua@relay.test"], index) : null
-		const answers = {
-			"How was your volunteer experience?": cycle(RATINGS, index),
-			"What went well?": cycle([
-				"The team leads communicated clearly before the event.",
-				"Setup moved faster than expected.",
-				"Guests were welcomed quickly.",
-				"Cleanup was well organized."
-			], index),
-			"What should improve?": cycle([
-				"Earlier briefing would help.",
-				"More signs at the entrance.",
-				"More water stations.",
-				"Clearer parking directions."
-			], index),
-			"Would you serve again?": cycle(YES_MAYBE_NO, index)
-		}
+function generateVolunteerSurveySubmissions (count) {
+	const experienceRatings = [
+		"Excellent", "Excellent", "Excellent", "Excellent", "Excellent", "Excellent",
+		"Good", "Good", "Good", "Good",
+		"Okay", "Okay",
+		"Needs work"
+	]
+	const serveAgainAnswers = [
+		"Yes", "Yes", "Yes", "Yes", "Yes", "Yes", "Yes", "Yes",
+		"Maybe", "Maybe", "No"
+	]
 
-		return respondent
-			? namedSubmission(respondent, answers, index + 400)
-			: anonymousSubmission(answers, index + 400)
-	})
+	return Array.from({ length: count }, (_, index) => createSubmission({
+		"How was your volunteer experience?": cycle(experienceRatings, index),
+		"What went well?": `Response ${index + 1}: ${cycle(POSITIVE_OUTCOMES, index)} because the ${cycle(TEAMS, index)} team prepared ${cycle(["early", "clearly", "calmly", "together"], index)} around the ${cycle(AREAS, index)}.`,
+		"What should improve?": `Improvement ${index + 1}: Please ${cycle(IMPROVEMENTS, index)} for the ${cycle(TEAMS, index + 3)} team before event block ${index + 1}.`,
+		"Would you serve again?": cycle(serveAgainAnswers, index)
+	}, index, 1400, 4))
+}
+
+function generateWorkshopSurveySubmissions (count) {
+	const usefulnessRatings = [
+		"Excellent", "Excellent", "Excellent",
+		"Good", "Good", "Good", "Good",
+		"Okay", "Needs work"
+	]
+
+	return Array.from({ length: count }, (_, index) => createSubmission({
+		"How useful was the workshop?": cycle(usefulnessRatings, index),
+		"What topic should we cover next?": `Topic request ${index + 1}: ${cycle(WORKSHOP_TOPICS, index)} for ${cycle(TEAMS, index)} volunteers, with practical examples from service week ${index + 1}.`
+	}, index, 1900, 3))
 }
 
 const SAMPLE_FORMS = [
@@ -184,7 +275,7 @@ const SAMPLE_FORMS = [
 		icon: "📝",
 		kind: "FORM",
 		status: "PUBLISHED",
-		submissions: generateMembershipSubmissions(135),
+		submissions: generateMembershipSubmissions(320),
 		title: "Membership intake"
 	},
 	{
@@ -221,7 +312,7 @@ const SAMPLE_FORMS = [
 		icon: "🎟️",
 		kind: "FORM",
 		status: "PUBLISHED",
-		submissions: generateEventRegistrationSubmissions(48),
+		submissions: generateEventRegistrationSubmissions(180),
 		title: "Conference registration"
 	},
 	{
@@ -250,7 +341,7 @@ const SAMPLE_FORMS = [
 	},
 	{
 		allowAnonymous: false,
-		allowMultipleSubmissions: false,
+		allowMultipleSubmissions: true,
 		description: "Draft form owned by the logged-in user, used to test unpublished/private form states.",
 		duplicateProtection: "LOGIN",
 		fields: [
@@ -269,12 +360,7 @@ const SAMPLE_FORMS = [
 		kind: "FORM",
 		requireLogin: true,
 		status: "DRAFT",
-		submissions: [
-			namedSubmission("ama@relay.test", {
-				"Leader name": "Ama Boateng",
-				"Team update": "Follow-up calls are scheduled for Saturday."
-			}, 20)
-		],
+		submissions: generateLeaderCheckInSubmissions(36),
 		title: "Team leader check-in"
 	},
 	{
@@ -295,7 +381,7 @@ const SAMPLE_FORMS = [
 		icon: "🗳️",
 		kind: "POLL",
 		status: "PUBLISHED",
-		submissions: generatePollSubmissions("Which service time do you prefer?", SERVICE_TIMES, [6, 17, 9, 0], 64, 600),
+		submissions: generatePollSubmissions("Which service time do you prefer?", SERVICE_TIMES, [6, 18, 9, 0], 420, 2400),
 		title: "Sunday service time poll"
 	},
 	{
@@ -315,7 +401,7 @@ const SAMPLE_FORMS = [
 		icon: "🎶",
 		kind: "POLL",
 		status: "PUBLISHED",
-		submissions: generatePollSubmissions("Which worship style should we feature next month?", WORSHIP_STYLES, [5, 5, 2, 1], 26, 800),
+		submissions: generatePollSubmissions("Which worship style should we feature next month?", WORSHIP_STYLES, [8, 8, 4, 3, 2], 260, 3000),
 		title: "Worship style poll"
 	},
 	{
@@ -342,7 +428,7 @@ const SAMPLE_FORMS = [
 		allowMultipleSubmissions: true,
 		allowMultipleVotes: true,
 		coverImageUrl: "https://images.unsplash.com/photo-1529333166437-7750a6dd5a70?auto=format&fit=crop&w=1600&q=80",
-		description: "Survey data is seeded now, but frontend analysis will be built later.",
+		description: "Survey data with distinct written responses for clear charts and word clouds.",
 		duplicateProtection: "NONE",
 		fields: [
 			{
@@ -373,13 +459,14 @@ const SAMPLE_FORMS = [
 		icon: "📊",
 		kind: "SURVEY",
 		status: "PUBLISHED",
-		submissions: generateSurveySubmissions(72),
+		submissions: generateVolunteerSurveySubmissions(360),
 		title: "Volunteer feedback survey"
 	},
 	{
 		allowAnonymous: true,
 		allowMultipleSubmissions: true,
-		description: "Short empty survey for future analysis empty states.",
+		description: "Workshop survey with varied topic requests for word cloud testing.",
+		duplicateProtection: "NONE",
 		fields: [
 			{
 				label: "How useful was the workshop?",
@@ -396,7 +483,7 @@ const SAMPLE_FORMS = [
 		icon: "💬",
 		kind: "SURVEY",
 		status: "PUBLISHED",
-		submissions: [],
+		submissions: generateWorkshopSurveySubmissions(240),
 		title: "Workshop feedback survey"
 	}
 ]
@@ -438,6 +525,14 @@ async function createSeedUser (user, password) {
 	})
 }
 
+async function runInChunks (items, size, task) {
+	for (let index = 0; index < items.length; index += size) {
+		const chunk = items.slice(index, index + size)
+
+		await Promise.all(chunk.map(task))
+	}
+}
+
 async function createSeedForm (ownerId, formData, usersByEmail) {
 	const { fields, submissions, ...form } = formData
 	const createdForm = await prisma.form.create({
@@ -474,7 +569,7 @@ async function createSeedForm (ownerId, formData, usersByEmail) {
 		}
 	})
 
-	await Promise.all(submissions.map((submission) => prisma.formSubmission.create({
+	await runInChunks(submissions, CONCURRENCY, (submission) => prisma.formSubmission.create({
 		data: {
 			anonymousTokenHash: submission.anonymousTokenHash || null,
 			createdAt: submission.createdAt || undefined,
@@ -484,7 +579,9 @@ async function createSeedForm (ownerId, formData, usersByEmail) {
 				create: buildAnswerCreateData(createdForm, submission.answers)
 			}
 		}
-	})))
+	}))
+
+	console.log(`Created ${createdForm.kind.toLowerCase()} "${createdForm.title}" with ${submissions.length} submissions.`)
 
 	return createdForm
 }

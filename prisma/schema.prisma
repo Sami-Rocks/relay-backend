@@ -112,8 +112,11 @@ model FormSubmission {
   answers            FormAnswer[]
 
   @@index([formId])
+  @@index([formId, createdAt, id])
   @@index([respondentId])
+  @@index([formId, respondentId])
   @@index([anonymousTokenHash])
+  @@index([formId, anonymousTokenHash])
 }
 
 model FormAnswer {
@@ -128,4 +131,5 @@ model FormAnswer {
 
   @@index([submissionId])
   @@index([fieldId])
+  @@index([fieldId, submissionId])
 }
