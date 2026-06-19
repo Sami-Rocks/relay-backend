@@ -3,12 +3,15 @@
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
+    "build": "prisma generate",
     "dev": "node server.js",
+    "postinstall": "prisma generate",
     "seed": "node prisma/seed.js",
     "seed:surveys:api": "node prisma/seed-surveys-api.js",
     "seed:surveys": "node prisma/seed-surveys.js",
     "test": "node --test --test-concurrency=1",
-    "test:coverage": "node --test --test-concurrency=1 --experimental-test-coverage"
+    "test:coverage": "node --test --test-concurrency=1 --experimental-test-coverage",
+    "start": "node server.js"
   },
   "prisma": {
     "seed": "node prisma/seed.js"
