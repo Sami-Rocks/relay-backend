@@ -426,6 +426,10 @@ async function updateForm (req, res) {
 		}
 
 		const formData = buildFormData(req.body, req.user.userId)
+		if (!formData) {
+			return res.status(400).json({ message: "Invalid form data" })
+		}
+
 		const kind = formData?.kind || existingForm.kind
 		const shouldUpdateFields = hasOwn(req.body, "fields")
 		const fields = shouldUpdateFields ? buildFieldsData(req.body.fields, kind) : undefined
@@ -437,7 +441,7 @@ async function updateForm (req, res) {
 		const kindError = fields ? validateKindRules(kind, fields) : null
 		const submissionRulesError = validateSubmissionRules(nextRules)
 
-		if (!formData || fields === null) {
+		if (fields === null) {
 			return res.status(400).json({ message: "Invalid form data" })
 		}
 

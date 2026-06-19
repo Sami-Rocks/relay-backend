@@ -7,7 +7,8 @@
     "seed": "node prisma/seed.js",
     "seed:surveys:api": "node prisma/seed-surveys-api.js",
     "seed:surveys": "node prisma/seed-surveys.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test --test-concurrency=1",
+    "test:coverage": "node --test --test-concurrency=1 --experimental-test-coverage"
   },
   "prisma": {
     "seed": "node prisma/seed.js"
